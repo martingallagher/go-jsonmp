@@ -4,7 +4,6 @@ A Go package to facilitate JSON merge patch format and processing rules ([RFC 73
 ## Installation
     go get -u github.com/martingallagher/go-jsonmp
 
-
 # Usage
 
 ### Bytes
@@ -30,6 +29,23 @@ b := &doc{Body: "Dennis"}
 var res *doc
 
 jsonmp.PatchValue(a, b, &res) // *doc{Title:"Hello", Body:"Dennis"}
+```
+
+### PatchValueWithReader()
+Useful when you need to perform post-patching validation.
+```go
+// HTTP PATCH /doc/123
+d, err := LoadDocument(123)
+
+// Patch result
+var p *Document
+
+err := PatchValueWithReader(d, r.Body, &p)
+
+err := p.Save()
+
+// w http.ResponseWriter
+err := json.NewEncoder(w).Encode(p)
 ```
 
 ### Patcher
