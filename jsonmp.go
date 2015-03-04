@@ -21,7 +21,7 @@ import (
 
 // Patch patches a JSON byte value in accordance with RFC 7386.
 func Patch(a, b []byte) ([]byte, error) {
-	// Optimization: combine and create a single JSON string
+	// Optimization: combine and create a single JSON value
 	// BenchmarkPatchOld  50000   27684 ns/op  3812 B/op  85 allocs/op
 	// BenchmarkPatchNew  100000  12476 ns/op  4860 B/op  18 allocs/op
 	a = append(a, 0)
@@ -45,23 +45,67 @@ func Patch(a, b []byte) ([]byte, error) {
 // PatchValue patches the interface values,
 // the destination interface recieves the result.
 func PatchValue(a, b, dst interface{}) error {
-	v, err := json.Marshal([]interface{}{a, b})
+	var err error
+
+	if a, err = coerce(a); err != nil {
+		return err
+	}
+
+	if b, err = coerce(b); err != nil {
+		return err
+	}
+
+	return marshalValue(a, b, dst)
+}
+
+// PatchValueWithBytes patches an interface value
+// with a byte value. The destination interface
+// recieves the result.
+func PatchValueWithBytes(a interface{}, c []byte, dst interface{}) error {
+	var err error
+
+	if a, err = coerce(a); err != nil {
+		return err
+	}
+
+	var b interface{}
+
+	if err = json.Unmarshal(c, &b); err != nil {
+		return err
+	}
+
+	return marshalValue(a, b, dst)
+}
+
+// PatchValueWithBytes patches an interface value
+// with an io.Reader. The destination interface
+// recieves the result.
+func PatchValueWithReader(a interface{}, r io.Reader, dst interface{}) error {
+	var err error
+
+	if a, err = coerce(a); err != nil {
+		return err
+	}
+
+	var b interface{}
+
+	if err = json.NewDecoder(r).Decode(&b); err != nil {
+		return err
+	}
+
+	return marshalValue(a, b, dst)
+}
+
+// marshalValue is a helper function for patching
+// and putting the result to a destination interface.
+func marshalValue(a, b, dst interface{}) error {
+	c, err := json.Marshal(patch(a, b))
 
 	if err != nil {
 		return err
 	}
 
-	var i []interface{}
-
-	if err = json.Unmarshal(v, &i); err != nil {
-		return err
-	}
-
-	if v, err = json.Marshal(patch(i[0], i[1])); err != nil {
-		return err
-	}
-
-	return json.Unmarshal(v, &dst)
+	return json.Unmarshal(c, &dst)
 }
 
 // Patcher reads the patch data from the Reader
@@ -81,7 +125,7 @@ func NewPatcher(r io.Reader, w io.Writer) *Patcher {
 // the content of the Patcher's Reader.
 // The result is then written to the Writer.
 func (p *Patcher) Patch(c []byte) error {
-	b, err := p.read()
+	b, err := read(p.r)
 
 	if err != nil {
 		return err
@@ -99,26 +143,26 @@ func (p *Patcher) Patch(c []byte) error {
 // PatchValue patches the interface with
 // the content of the Patcher's Reader.
 // The result is then written to the Writer.
-func (p *Patcher) PatchValue(v interface{}) error {
-	i, err := coerce(v)
+func (p *Patcher) PatchValue(a interface{}) error {
+	var err error
+
+	if a, err = coerce(a); err != nil {
+		return err
+	}
+
+	b, err := read(p.r)
 
 	if err != nil {
 		return err
 	}
 
-	b, err := p.read()
-
-	if err != nil {
-		return err
-	}
-
-	return p.write(i, b)
+	return p.write(a, b)
 }
 
-func (p *Patcher) read() (interface{}, error) {
+func read(r io.Reader) (interface{}, error) {
 	var i interface{}
 
-	err := json.NewDecoder(p.r).Decode(&i)
+	err := json.NewDecoder(r).Decode(&i)
 
 	return i, err
 }
@@ -127,8 +171,21 @@ func (p *Patcher) write(a, b interface{}) error {
 	return json.NewEncoder(p.w).Encode(patch(a, b))
 }
 
-// coerces the original interface into a vanilla interface
+// coerces the original interface into a vanilla interface.
 func coerce(i interface{}) (interface{}, error) {
+	if i == nil {
+		return i, nil
+	}
+
+	// Assume vanilla interface, exit early
+	switch i.(type) {
+	case map[string]interface{}:
+		return i, nil
+
+	case []interface{}:
+		return i, nil
+	}
+
 	b, err := json.Marshal(i)
 
 	if err != nil {
@@ -137,11 +194,10 @@ func coerce(i interface{}) (interface{}, error) {
 
 	var v interface{}
 
-	err = json.Unmarshal(b, &v)
-
-	return v, err
+	return v, json.Unmarshal(b, &v)
 }
 
+// patches A with B and returns the result
 func patch(a, b interface{}) interface{} {
 	if m, ok := a.(map[string]interface{}); ok {
 		return handleMap(m, b)
@@ -181,7 +237,6 @@ func handleMap(m map[string]interface{}, p interface{}) interface{} {
 	}
 
 	for k, v := range c {
-
 		// New entry
 		if _, exists := m[k]; !exists {
 			if v == nil {

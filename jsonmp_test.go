@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 var testData = []struct{ a, b, result string }{
@@ -54,6 +53,19 @@ var testData = []struct{ a, b, result string }{
 }`},
 }
 
+type testStruct struct {
+	Title       string   `json:"title,omitempty"`
+	PhoneNumber string   `json:"phoneNumber,omitempty"`
+	Content     string   `json:"content,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Author      *author  `json:"author,omitempty"`
+}
+
+type author struct {
+	GivenName  string `json:"givenName,omitempty"`
+	FamilyName string `json:"familyName,omitempty"`
+}
+
 // fmtResult encodes the result JSON in accordance with
 // encoding/json for field-ordering reasons
 func fmtResult(s string) string {
@@ -80,42 +92,108 @@ func TestPatch(t *testing.T) {
 	}
 }
 
-type document struct {
-	Title     string    `json:"title,omitempty"`
-	Body      string    `json:"body,omitempty"`
-	Author    string    `json:"author,omitempty"`
-	Score     int       `json:"score,omitempty"`
-	Published time.Time `json:"published,omitempty"`
-}
-
 func TestPatchValue(t *testing.T) {
-	d := &document{
-		Title: "On the Origin of Species",
-		Body:  "...",
-	}
+	var a, b, r interface{}
 
-	d.Published, _ = time.Parse("02 Jan 2005", "24 Nov 1859")
-	body := "From the strong principle of inheritance, any selected variety will tend to propagate its new and modified form."
-
-	p := &document{
-		Body:      body,
-		Author:    "Charles Darwin",
-		Score:     10,
-		Published: time.Time{},
-	}
-
-	var result *document
-
-	if err := PatchValue(d, p, &result); err != nil {
+	if err := json.Unmarshal([]byte(testData[15].a), &a); err != nil {
 		t.Fatal(err)
 	}
 
-	if !result.Published.IsZero() {
-		t.Fatal("invalid published value")
-	} else if result.Body != body {
-		t.Fatal("invalid body value")
-	} else if result.Score != 10 {
-		t.Fatal("invalid score value")
+	if err := json.Unmarshal([]byte(testData[15].b), &b); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := json.Unmarshal([]byte(testData[15].result), &r); err != nil {
+		t.Fatal(err)
+	}
+
+	// Patched result
+	var p interface{}
+
+	if err := PatchValue(a, b, &p); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(p, r) {
+		t.Fatal("invalid result")
+	}
+}
+
+func TestPatchValueWithBytes(t *testing.T) {
+	for i, c := range testData {
+		var a interface{}
+
+		if err := json.Unmarshal([]byte(c.a), &a); err != nil {
+			t.Fatal(err)
+		}
+
+		var r interface{}
+
+		if err := PatchValueWithBytes(a, []byte(c.b), &r); err != nil {
+			t.Fatal(err)
+		}
+
+		var x interface{}
+
+		if err := json.Unmarshal([]byte(c.result), &x); err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(r, x) {
+			t.Fatal("incorrect result for test data", i)
+		}
+	}
+}
+
+func TestPatchValueWithBytesTyped(t *testing.T) {
+	var a, p, r *testStruct
+
+	if err := json.Unmarshal([]byte(testData[15].a), &a); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := json.Unmarshal([]byte(testData[15].result), &r); err != nil {
+		t.Fatal(err)
+	}
+
+	// Patched result
+	b := []byte(testData[15].b)
+
+	if err := PatchValueWithBytes(a, b, &p); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(p, r) {
+		t.Fatal("invalid result")
+	}
+}
+
+func TestPatchValueWithReader(t *testing.T) {
+	for i, c := range testData {
+		var a interface{}
+
+		if err := json.Unmarshal([]byte(c.a), &a); err != nil {
+			t.Fatal(err)
+		}
+
+		var (
+			x interface{}
+			r = bytes.NewReader([]byte(c.b))
+		)
+
+		if err := PatchValueWithReader(a, r, &x); err != nil {
+			t.Fatal(err)
+		}
+
+		var y interface{}
+
+		if err := json.Unmarshal([]byte(c.result), &y); err != nil {
+			t.Fatal(err)
+		}
+
+		if !reflect.DeepEqual(x, y) {
+			t.Fatal("incorrect result for test data", i)
+		}
 	}
 }
 
@@ -186,11 +264,67 @@ func TestPatcher(t *testing.T) {
 func BenchmarkPatch(b *testing.B) {
 	b.ReportAllocs()
 
-	// Preallocate
 	x, y := []byte(testData[15].a), []byte(testData[15].b)
 
 	for i := 0; i < b.N; i++ {
 		Patch(x, y)
+	}
+}
+
+func BenchmarkPatchValue(b *testing.B) {
+	b.ReportAllocs()
+
+	var x, y, r interface{}
+
+	json.Unmarshal([]byte(testData[15].a), &x)
+	json.Unmarshal([]byte(testData[15].b), &y)
+
+	for i := 0; i < b.N; i++ {
+		PatchValue(x, y, &r)
+	}
+}
+
+func BenchmarkPatchValueWithBytes(b *testing.B) {
+	b.ReportAllocs()
+
+	var (
+		v, r interface{}
+		p    = []byte(testData[15].a)
+	)
+
+	json.Unmarshal([]byte(testData[15].a), &v)
+
+	for i := 0; i < b.N; i++ {
+		PatchValueWithBytes(v, p, &r)
+	}
+}
+
+func BenchmarkPatchValueWithBytesTyped(b *testing.B) {
+	b.ReportAllocs()
+
+	var (
+		x, r *testStruct
+		p    = []byte(testData[15].b)
+	)
+
+	json.Unmarshal([]byte(testData[15].a), &x)
+
+	for i := 0; i < b.N; i++ {
+		PatchValueWithBytes(x, p, &r)
+	}
+}
+
+func BenchmarkPatchValueWithReader(b *testing.B) {
+	b.ReportAllocs()
+
+	var (
+		x, y interface{}
+		r    = bytes.NewReader([]byte(testData[15].a))
+	)
+
+	for i := 0; i < b.N; i++ {
+		PatchValueWithReader(x, r, &y)
+		r.Seek(0, 0)
 	}
 }
 
