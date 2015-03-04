@@ -186,6 +186,7 @@ func TestPatcher(t *testing.T) {
 func BenchmarkPatch(b *testing.B) {
 	b.ReportAllocs()
 
+	// Preallocate
 	x, y := []byte(testData[15].a), []byte(testData[15].b)
 
 	for i := 0; i < b.N; i++ {
@@ -196,14 +197,16 @@ func BenchmarkPatch(b *testing.B) {
 func BenchmarkPatcher(b *testing.B) {
 	b.ReportAllocs()
 
+	// Preallocate for better statistics for Patcher benchmark
 	buf := &bytes.Buffer{}
+	r := bytes.NewReader([]byte(testData[15].b))
+	x := []byte(testData[15].a)
 
 	for i := 0; i < b.N; i++ {
-		buf.Reset()
-
-		r := strings.NewReader(testData[15].b)
 		p := NewPatcher(r, buf)
 
-		p.Patch([]byte(testData[15].a))
+		p.Patch(x)
+		r.Seek(0, 0)
+		buf.Reset()
 	}
 }
