@@ -28,7 +28,7 @@ b := &doc{Body: "Dennis"}
 
 var res *doc
 
-jsonmp.PatchValue(a, b, &res) // *doc{Title:"Hello", Body:"Dennis"}
+jsonmp.PatchValue(a, b, &res) // &doc{Title:"Hello", Body:"Dennis"}
 ```
 
 ### PatchValueWithReader()
@@ -40,7 +40,7 @@ d, err := LoadDocument(123)
 // Patch result
 var p *Document
 
-err := PatchValueWithReader(d, r.Body, &p)
+err := jsonmp.PatchValueWithReader(d, r.Body, &p)
 
 err := p.Save()
 
